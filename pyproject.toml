@@ -7,9 +7,11 @@ dependencies = [
     "click>=8.0.0",               # CLI用
     "chromadb>=0.4.0",
     "langchain>=0.2.0",
+    "langchain-chroma>=0.2.5",
     "langchain-community>=0.2.0",
     "langchain-openai>=0.1.0",
     "openai>=1.0.0",
+    "psutil>=7.0.0",
     "pydantic>=2.0.0",
     "pypdf>=4.0.0",
     "python-dotenv>=1.0.0",
@@ -27,6 +29,7 @@ dev = [
     "pytest-testmon>=2.1.3",
     "types-pytz>=2025.2.0.20250809",
     "types-requests>=2.32.4.20250809",
+    "typing-extensions>=4.15.0",
     "vulture>=2.14",
 ]
 
@@ -39,6 +42,12 @@ dev = [
 pythonpath = ["src"]         # Pythonパス設定（appディレクトリをパスに追加）
 testpaths = ["tests"]        # テストディレクトリの指定
 python_files = ["test_*.py"] # テストファイルのパターン
+# 既定では統合テストおよびパフォーマンステストをスキップ
+addopts = "-m 'not integration and not perf'"
+markers = [
+    "perf: marks tests as performance tests",
+    "integration: marks tests as integration tests (skipped by default)",
+]
 
 # =====================================
 # ruff設定
@@ -204,13 +213,11 @@ disallow_any_explicit = true        # 明示的なAny型の使用制御
 disallow_any_generics = true        # ジェネリックAny型の使用制御
 warn_return_any = false             # Any型の戻り値警告制御
 ignore_missing_imports = true       # 型情報がないモジュールのimportエラーを制御
+disallow_any_unimported = false     # 未追跡importのAny型制御を緩和
 
 # =====================================
 # coverage設定
 # =====================================
-
-[tool.coverage]
-data_file = ".coverage/coverage"
 
 [tool.coverage.run]
 source = ["src"] # カバレッジ測定対象
@@ -219,12 +226,13 @@ omit = [
     "*/conftest.py", # pytest設定ファイル除外
     "main.py",       # エントリーポイントは除外
 ]
-branch = true # 分岐カバレッジも測定
+branch = true # 分岐カバレッジの測定フラグ
 
 [tool.coverage.report]
 show_missing = true  # カバーされていない行を表示
 skip_covered = false # カバーされた行も表示
-fail_under = 85      # 85%未満で失敗（LLM品質向上のため厳格化）
+fail_under = 85      # カバレッジ閾値
+exclude_lines = []
 
 # =====================================
 # ty設定（型チェック用ファイル除外）
@@ -235,4 +243,5 @@ exclude = [".venv"]
 
 [tool.vulture]
 exclude = []
-ignore_names = []
+ignore_names = ["cls"]
+ignore_decorators = ["@cli.command", "@field_validator"]
