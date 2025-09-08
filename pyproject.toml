@@ -1,0 +1,238 @@
+[project]
+name = "ragtry"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+dependencies = [
+    "click>=8.0.0",               # CLI用
+    "chromadb>=0.4.0",
+    "langchain>=0.2.0",
+    "langchain-community>=0.2.0",
+    "langchain-openai>=0.1.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "pypdf>=4.0.0",
+    "python-dotenv>=1.0.0",
+    "pytz>=2025.2",
+    "requests>=2.31.0",
+]
+
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17.1",
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+    "pytest-mock>=3.14.1",
+    "pytest-testmon>=2.1.3",
+    "types-pytz>=2025.2.0.20250809",
+    "types-requests>=2.32.4.20250809",
+    "vulture>=2.14",
+]
+
+
+# =====================================
+# pytest設定
+# =====================================
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]         # Pythonパス設定（appディレクトリをパスに追加）
+testpaths = ["tests"]        # テストディレクトリの指定
+python_files = ["test_*.py"] # テストファイルのパターン
+
+# =====================================
+# ruff設定
+# =====================================
+
+[tool.ruff]
+line-length = 100 # 1行の最大文字数（可読性とモニター幅のバランス）
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle エラー（コードスタイル基本）
+    "F",      # pyflakes（構文エラー、未使用import等）
+    "W",      # pycodestyle 警告（非推奨パターン等）
+    "ANN",    # flake8-annotations（型注釈チェック）
+    "I",      # isort（import文の並び順チェック）
+    "UP",     # pyupgrade（Python新機能への更新推奨）
+    "PT",     # flake8-pytest-style（pytest記法チェック）
+    "C90",    # mccabe complexity（循環的複雑度チェック）
+    "C4",     # flake8-comprehensions（リスト内包表記等の最適化）
+    "TID",    # flake8-tidy-imports（import文の整理/type: ignore禁止TID252も含む）
+    "SIM",    # flake8-simplify（コード簡素化推奨）
+    "RET",    # flake8-return（return文の最適化）
+    "ARG",    # flake8-unused-arguments（未使用引数チェック）
+    "PIE",    # flake8-pie（よくあるミスパターンチェック）
+    "PL",     # pylint（包括的品質チェック）
+    "RUF",    # ruff-specific rules（ruff独自ルール）
+    "B",      # flake8-bugbear（潜在的バグパターンチェック）
+    "A",      # flake8-builtins（組み込み関数名の衝突チェック）
+    "COM",    # flake8-commas（カンマ記法チェック）
+    "ISC",    # flake8-implicit-str-concat（文字列結合チェック）
+    "T20",    # flake8-print（print文使用チェック）
+    "N",      # pep8-naming（命名規則チェック）
+    "S",      # bandit（セキュリティ脆弱性チェック）
+    "FBT",    # flake8-boolean-trap（boolean引数パターンチェック）
+    "ERA",    # eradicate（コメントアウトされたコード検出・type: ignoreも検出）
+    "DTZ",    # flake8-datetimez（datetime安全性チェック）
+    "PD",     # pandas-vet（pandas最適化チェック）
+    "PLR",    # pylint refactor（リファクタリング推奨）
+    "TID252", # type: ignore禁止
+]
+
+ignore = [
+    # formatterとの競合回避
+    "COM812", # trailing-comma-missing（formatterと競合するため無効化）
+    "ISC001", # single-line-implicit-string-concatenation（formatterと競合）
+
+    # 日本語プロジェクト対応
+    "RUF003",  # ambiguous-unicode-character-comment（日本語コメントを許可）
+    "PLC2401", # non-ascii-name（日本語変数名を基本的に許可）
+
+    # セキュリティ関連（必要に応じて個別対応）
+    "S101", # Use of assert（テストでは問題なし、プロダクトは個別対応）
+    "S603", # subprocess-without-shell-equals-true（セキュリティ上必要な場合あり）
+
+    # 関数設計関連（設定値で使用するため許可）
+    "FBT001", # Boolean positional arg in function definition（設定値で使用）
+    "FBT002", # Boolean default value in function definition（フラグパラメータで使用）
+
+    # マジックナンバー（テスト以外では厳格化）
+    # "PLR2004", # magic-value-comparison（プロダクトコードでは原則禁止）
+]
+
+[tool.ruff.format]
+quote-style = "single" # シングルクォートを優先（統一性重視）
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"] # プロジェクト内パッケージの指定
+
+[tool.ruff.lint.mccabe]
+max-complexity = 4 # 循環的複雑度の上限（関数の複雑さ制限）
+
+# flake8系設定
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true     # __init__メソッドの戻り値型も要求
+allow-star-arg-any = false  # *args, **kwargsでもAny禁止
+suppress-dummy-args = false # ダミー引数でも型注釈要求
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [] # イミュータブルとして扱う関数の追加
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = false # pytest fixtureで括弧を強制しない
+mark-parentheses = false    # pytest markで括弧を強制しない
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents" # 親ディレクトリへの相対importを禁止
+
+[tool.ruff.lint.pylint]
+max-args = 4        # 関数の引数の最大数（4個まで許可、LLM品質向上）
+max-branches = 5    # 関数内の分岐の最大数（if、for、while等）
+max-returns = 2     # 関数内のreturn文の最大数（単一出口原則）
+max-statements = 15 # 関数内の文の最大数（可読性保持、LLM品質向上）
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "PLR2004", # マジックナンバー許可（テストデータ）
+    "PLR0915", # 長い関数許可（テストシナリオで必要）
+    "PLR0913", # 多い引数許可（テストセットアップで必要）
+    "ARG",     # 未使用引数許可（fixtureパターン）
+    "PLC2401", # 非ASCII文字許可（日本語テスト名）
+    "S",       # セキュリティチェック緩和（テスト環境）
+    "N",       # 命名規則緩和（日本語テスト関数名許可）
+    "T20",     # print文許可（テストでのデバッグ出力）
+    "DTZ",     # datetime関連許可（テストではTZ不要）
+    "ERA001",  # コメントアウトコード許可（Gherkin記法のため）
+]
+"tests_e2e/**" = [
+    "PLR2004", # マジックナンバー許可（座標・サイズ指定）
+    "PLR0915", # 長い関数許可（E2Eシナリオで必要）
+    "PLR0913", # 多い引数許可（pageフィクスチャパターン）
+    "ARG",     # 未使用引数許可（pageフィクスチャパターン）
+    "PLC2401", # 非ASCII文字許可（日本語テスト名）
+    "S",       # セキュリティチェック緩和（テスト環境）
+    "N",       # 命名規則緩和（日本語テスト関数名許可）
+    "T20",     # print文許可（デバッグ出力）
+    "DTZ",     # datetime関連許可（テストではTZ不要）
+    "ERA001",  # コメントアウトコード許可（Gherkin記法のため）
+]
+
+# =====================================
+# mypy設定
+# =====================================
+
+[tool.mypy]
+python_version = "3.13" # 対象Pythonバージョン
+strict = true           # 厳格モード有効（高品質コード保証）
+show_error_codes = true # エラーコードを表示（精密な制御のため）
+pretty = true           # 色付きで見やすいエラー表示
+
+exclude = ["ait"]
+
+enable_error_code = [
+    "truthy-bool",
+    "redundant-expr",
+    "unused-awaitable",
+    "ignore-without-code", # type: ignore にはエラーコード必須
+    "possibly-undefined",  # 未定義変数の可能性を検出
+] # 追加チェック有効化
+
+# 型情報不足のライブラリ対応
+ignore_missing_imports = true # 型情報がないモジュールのimportエラーを無視
+
+# Any型の厳格化（LLMコード品質向上）
+disallow_any_unimported = true # 外部ライブラリのAny型も可能な限り制限
+
+# 到達不能コードの警告（LLMコード品質向上のため重要）
+warn_unreachable = true # 到達不能コードの警告を有効（LLMが良質なコードを学習）
+
+# 追加の品質向上設定
+warn_redundant_casts = true # 不要な型キャストを検出
+warn_unused_ignores = true  # 不要な # type: ignore を検出
+warn_return_any = true      # Any を返すコードで警告
+check_untyped_defs = true   # 型注釈のない関数の内部もチェック
+strict_equality = true      # 型安全でない等価比較を検出
+warn_no_return = true       # 戻り値がない関数での問題を検出
+warn_incomplete_stub = true # スタブファイルの不完全性を警告
+
+# テスト用設定（型チェックを緩和）
+[[tool.mypy.overrides]]
+module = ["tests.*", "tests_e2e.*"]
+disallow_untyped_defs = false       # 関数の型注釈必須制御
+disallow_any_explicit = true        # 明示的なAny型の使用制御
+disallow_any_generics = true        # ジェネリックAny型の使用制御
+warn_return_any = false             # Any型の戻り値警告制御
+ignore_missing_imports = true       # 型情報がないモジュールのimportエラーを制御
+
+# =====================================
+# coverage設定
+# =====================================
+
+[tool.coverage]
+data_file = ".coverage/coverage"
+
+[tool.coverage.run]
+source = ["src"] # カバレッジ測定対象
+omit = [
+    "tests/*",       # テストコード自体は除外
+    "*/conftest.py", # pytest設定ファイル除外
+    "main.py",       # エントリーポイントは除外
+]
+branch = true # 分岐カバレッジも測定
+
+[tool.coverage.report]
+show_missing = true  # カバーされていない行を表示
+skip_covered = false # カバーされた行も表示
+fail_under = 85      # 85%未満で失敗（LLM品質向上のため厳格化）
+
+# =====================================
+# ty設定（型チェック用ファイル除外）
+# =====================================
+[tool.ty.src]
+include = ["src", "tests", "tests_e2e"]
+exclude = [".venv"]
+
+[tool.vulture]
+exclude = []
+ignore_names = []
