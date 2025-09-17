@@ -9,8 +9,7 @@ from typing import Any
 
 import click
 
-from src.app_types import AppEnv
-from src.config import Config, config
+from src.config import Config, bootstrap_config
 from src.rag_service import RAGService
 
 # Constants
@@ -101,7 +100,7 @@ def _display_system_config(config: Config, env: str) -> None:
     click.echo(f'チャンクサイズ: {config.chunk_size}文字')
     click.echo(f'オーバーラップ: {config.chunk_overlap}文字')
     click.echo(f'検索文書数: {config.search_k}件')
-    click.echo(f'ベクトルDB: {config.chroma_persist_directory}')
+    click.echo(f'ベクトルDB: {config.faiss_persist_directory}')
 
 
 def _display_database_info(collection_info: dict[str, Any]) -> None:
@@ -180,10 +179,14 @@ def _process_query_request(
     return response, documents
 
 
-def _prepare_service(env: str) -> tuple[RAGService, Config]:  # noqa: ARG001
+def _prepare_service(env: str) -> tuple[RAGService, Config]:
     """環境に応じたサービスと設定を準備する."""
-    service = RAGService()
-    return service, config
+    # CLIで指定された環境を環境変数に設定
+    os.environ['ENV'] = env
+    # 設定を再初期化
+    config_instance = bootstrap_config()
+    service = RAGService(config_instance)
+    return service, config_instance
 
 
 @cli.command()
@@ -228,13 +231,13 @@ def info(ctx: click.Context) -> None:
     env = ctx.obj['env']
 
     try:
-        # 環境名の解決（ENV環境変数を優先、未定義の場合はdev）
-        env_from_var = os.getenv('ENV', AppEnv.DEV)
-        valid_envs = {e.value for e in AppEnv}
-        resolved_env = env_from_var if env_from_var in valid_envs else env
-        _display_system_config(config, resolved_env)
+        # CLIで指定された環境を環境変数に設定
+        os.environ['ENV'] = env
+        # 設定を再初期化
+        config_instance = bootstrap_config()
+        _display_system_config(config_instance, env)
 
-        rag_service = RAGService()
+        rag_service = RAGService(config_instance)
         collection_info = rag_service.get_collection_info()
         _display_database_info(collection_info)
 

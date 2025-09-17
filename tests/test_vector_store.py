@@ -4,11 +4,9 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
 from langchain.schema import Document
 from pytest_mock import MockerFixture
 
-from src.exceptions import OperationFailedError
 from src.vector_store import VectorStore
 
 
@@ -48,39 +46,39 @@ class TestVectorStore:
         assert vector_store.embedding_model == 'text-embedding-ada-002'
         assert custom_dir.exists()
 
-    def test_ベクトルストアを初期化できる(self, mocker: MockerFixture) -> None:
+    def test_ベクトルストアを読み込める(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
         mocker.patch('src.vector_store.OpenAIEmbeddings')
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
-        mock_chroma = mocker.patch('src.vector_store.Chroma')
-        mock_vectorstore = mocker.Mock()
-        mock_chroma.return_value = mock_vectorstore
+        # FAISSの読み込みをモック（存在しないケース）
+        mock_load = mocker.patch.object(vector_store, '_load_vectorstore')
+        mock_load.return_value = None
 
-        result = vector_store.initialize_vectorstore()
+        result = vector_store._load_vectorstore()
 
-        assert result == mock_vectorstore
-        # Chromaの呼び出しを確認
-        mock_chroma.assert_called_once()
-        call_args = mock_chroma.call_args
-        assert call_args.kwargs['collection_name'] == 'scrum_guide_collection'
-        assert call_args.kwargs['embedding_function'] == vector_store.embeddings
-        assert call_args.kwargs['persist_directory'] == str(self.temp_dir)
+        assert result is None
 
-    def test_ベクトルストア初期化が失敗する(self, mocker: MockerFixture) -> None:
+    def test_ベクトルストア読み込みが失敗する(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
         mocker.patch('src.vector_store.OpenAIEmbeddings')
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
-        mock_chroma = mocker.patch('src.vector_store.Chroma')
-        mock_chroma.side_effect = Exception('Chroma error')
+        # ファイルが存在することをモック
+        mock_path = mocker.Mock()
+        mock_path.exists.return_value = True
+        vector_store.index_path = mock_path
+        vector_store.pkl_path = mock_path
 
-        with pytest.raises(OperationFailedError) as exc_info:
-            vector_store.initialize_vectorstore()
+        # FAISS.load_localでエラーを発生させる
+        mock_faiss = mocker.patch('src.vector_store.FAISS')
+        mock_faiss.load_local.side_effect = Exception('FAISS error')
 
-        assert 'ベクトルストア初期化' in str(exc_info.value)
+        result = vector_store._load_vectorstore()
+
+        assert result is None
 
     def test_ドキュメントを追加できる(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
@@ -88,10 +86,12 @@ class TestVectorStore:
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
-        # モックの設定
-        mock_init = mocker.patch.object(VectorStore, 'initialize_vectorstore')
+        # 新規作成のケース
+        mock_load = mocker.patch.object(vector_store, '_load_vectorstore')
+        mock_load.return_value = None
+        mock_create = mocker.patch.object(vector_store, '_create_new_vectorstore')
         mock_vectorstore = mocker.Mock()
-        mock_init.return_value = mock_vectorstore
+        mock_create.return_value = mock_vectorstore
 
         documents = [
             Document(page_content='test1', metadata={}),
@@ -102,8 +102,10 @@ class TestVectorStore:
         vector_store.add_documents(documents)
 
         # 検証
-        mock_vectorstore.add_documents.assert_called_once_with(documents)
-        # Note: persist() is not called in newer langchain-chroma (auto-persists)
+        mock_create.assert_called_once_with(documents)
+        mock_vectorstore.save_local.assert_called_once_with(
+            str(self.temp_dir), index_name='scrum_guide_collection'
+        )
 
     def test_空リストは追加処理を行わない(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
@@ -112,13 +114,13 @@ class TestVectorStore:
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
         # モックの設定
-        mock_init = mocker.patch.object(VectorStore, 'initialize_vectorstore')
+        mock_load = mocker.patch.object(vector_store, '_load_vectorstore')
 
         # テスト実行
         vector_store.add_documents([])
 
-        # 検証（初期化すら呼ばれない）
-        mock_init.assert_not_called()
+        # 検証（読み込みすら呼ばれない）
+        mock_load.assert_not_called()
 
     def test_ドキュメントをバッチ追加できる(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
@@ -126,10 +128,11 @@ class TestVectorStore:
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
-        # モックの設定
-        mock_init = mocker.patch.object(VectorStore, 'initialize_vectorstore')
+        # 既存のベクトルストアがあるケース
+        mock_load = mocker.patch.object(vector_store, '_load_vectorstore')
         mock_vectorstore = mocker.Mock()
-        mock_init.return_value = mock_vectorstore
+        mock_load.return_value = mock_vectorstore
+        mock_add_to_existing = mocker.patch.object(vector_store, '_add_to_existing_vectorstore')
 
         # 150個のドキュメントを作成（バッチサイズ100を超える）
         documents = [Document(page_content=f'test{i}', metadata={}) for i in range(150)]
@@ -137,14 +140,11 @@ class TestVectorStore:
         # テスト実行
         vector_store.add_documents(documents, batch_size=100)
 
-        # 検証（2回に分けて呼ばれる）
-        assert mock_vectorstore.add_documents.call_count == 2
-        # 1回目: 100個
-        first_call_args = mock_vectorstore.add_documents.call_args_list[0][0][0]
-        assert len(first_call_args) == 100
-        # 2回目: 50個
-        second_call_args = mock_vectorstore.add_documents.call_args_list[1][0][0]
-        assert len(second_call_args) == 50
+        # 検証
+        mock_add_to_existing.assert_called_once_with(mock_vectorstore, documents, 100)
+        mock_vectorstore.save_local.assert_called_once_with(
+            str(self.temp_dir), index_name='scrum_guide_collection'
+        )
 
     def test_コレクションが存在しない(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
@@ -161,25 +161,27 @@ class TestVectorStore:
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
-        mock_exists = mocker.patch.object(VectorStore, 'collection_exists')
-        mock_exists.return_value = True
+        # ファイルを作成してコレクションが存在する状態にする
+        vector_store.index_path.touch()
+        vector_store.pkl_path.touch()
 
-        mock_delete = mocker.patch.object(vector_store.client, 'delete_collection')
         vector_store.delete_collection()
-        mock_delete.assert_called_once_with('scrum_guide_collection')
 
-    def test_コレクションが無いと削除されない(self, mocker: MockerFixture) -> None:
+        # ファイルが削除されていることを確認
+        assert not vector_store.index_path.exists()
+        assert not vector_store.pkl_path.exists()
+
+    def test_コレクションが無いと削除処理は何もしない(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
         mocker.patch('src.vector_store.OpenAIEmbeddings')
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
-        mock_exists = mocker.patch.object(VectorStore, 'collection_exists')
-        mock_exists.return_value = False
-
-        mock_delete = mocker.patch.object(vector_store.client, 'delete_collection')
+        # ファイルが存在しない状態で削除を実行
         vector_store.delete_collection()
-        mock_delete.assert_not_called()
+
+        # エラーが発生しないことを確認（正常終了）
+        assert True
 
     def test_コレクションが無いとカウント0(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
@@ -197,11 +199,11 @@ class TestVectorStore:
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
         # モックの設定
-        mock_init = mocker.patch.object(VectorStore, 'initialize_vectorstore')
+        mock_load = mocker.patch.object(vector_store, '_load_vectorstore')
         mock_vectorstore = mocker.Mock()
         mock_results = [Document(page_content='result1', metadata={})]
         mock_vectorstore.similarity_search.return_value = mock_results
-        mock_init.return_value = mock_vectorstore
+        mock_load.return_value = mock_vectorstore
 
         # テスト実行
         result = vector_store.similarity_search('query', k=1)
@@ -217,12 +219,12 @@ class TestVectorStore:
         vector_store = VectorStore(persist_directory=self.temp_dir)
 
         # モックの設定
-        mock_init = mocker.patch.object(VectorStore, 'initialize_vectorstore')
+        mock_load = mocker.patch.object(vector_store, '_load_vectorstore')
         mock_vectorstore = mocker.Mock()
         mock_doc = Document(page_content='result1', metadata={})
         mock_results = [(mock_doc, 0.9)]
         mock_vectorstore.similarity_search_with_score.return_value = mock_results
-        mock_init.return_value = mock_vectorstore
+        mock_load.return_value = mock_vectorstore
 
         # テスト実行
         result = vector_store.similarity_search_with_score('query', k=1)

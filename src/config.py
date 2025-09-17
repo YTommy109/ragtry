@@ -4,19 +4,14 @@
 """
 
 import os
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from .app_types import AppEnv
 from .exceptions import NotFoundFileError, UndefinedVariableError
-
-if TYPE_CHECKING:
-    from .app_types import AppEnv
-else:
-    from .app_types import AppEnv
 
 ENV_FILE_MAP = {
     AppEnv.DEV: '.env.dev',
@@ -27,7 +22,6 @@ REQUIRED_ENVS = (
     'OPENAI_API_KEY',
     'DATA_DIR',
     'PDF_URL',
-    'PDF_FILENAME',
     'LLM_MODEL',
     'EMBEDDING_MODEL',
 )
@@ -45,14 +39,14 @@ class Config:
     def separators(self) -> list[str]:
         """チャンク分割で使用するセパレータ一覧."""
         # テスト期待値に合わせ、エスケープ表記の改行を使用する
-        return ['\\n\\n', '\\n', '。', '、', ' ', '']
+        return ['\\n\\n', '\\n', '。']
 
     @property
     def openai_api_key(self) -> str:
         return os.environ['OPENAI_API_KEY']
 
     @property
-    def chroma_persist_directory(self) -> Path:
+    def faiss_persist_directory(self) -> Path:
         return self.data_dir / 'vector_db'
 
     @property
@@ -69,7 +63,9 @@ class Config:
 
     @property
     def pdf_filename(self) -> str:
-        return os.environ['PDF_FILENAME']
+        """PDF URLからファイル名を抽出する."""
+        parsed_url = urlparse(self.pdf_url)
+        return Path(parsed_url.path).name
 
     @property
     def llm_model(self) -> str:
@@ -85,30 +81,27 @@ class Config:
         return os.environ.get('OPENAI_API_BASE')
 
 
-def load_env_file(env: 'AppEnv', loader: Callable[[str], bool]) -> None:
-    """環境に応じた .env をロードする(ローダを注入)."""
+def bootstrap_config() -> Config:
+    """設定初期化のエントリポイント(副作用はここに集約)."""
+    env_value = AppEnv(os.environ.get('ENV', AppEnv.DEV))
+    _load_env_file(env_value)
+    _validate_required_envs()
+    return Config()
+
+
+def _load_env_file(env: 'AppEnv') -> None:
+    """環境に応じた .env をロードする."""
     env_file = Path(ENV_FILE_MAP[env])
     if not env_file.exists():
         raise NotFoundFileError(path=env_file, file_type=f'環境 {env} の.envファイル')
-    loader(str(env_file))
+    load_dotenv(str(env_file))
 
 
-def validate_required_envs(environ: Mapping[str, str]) -> None:
-    """必須環境変数の検証を行う(純粋関数)."""
+def _validate_required_envs() -> None:
+    """必須環境変数の検証を行う."""
     for var in REQUIRED_ENVS:
-        if not environ.get(var):
+        if not os.environ.get(var):
             raise UndefinedVariableError(var_name=var)
-
-
-def bootstrap_config(
-    environ: Mapping[str, str] = os.environ,
-    loader: Callable[[str], bool] = load_dotenv,
-) -> Config:
-    """設定初期化のエントリポイント(副作用はここに集約)."""
-    env_value = AppEnv(environ.get('ENV', AppEnv.DEV))
-    load_env_file(env_value, loader)
-    validate_required_envs(environ)
-    return Config()
 
 
 config: Config = bootstrap_config()

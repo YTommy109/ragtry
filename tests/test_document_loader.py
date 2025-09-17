@@ -8,6 +8,7 @@ import requests
 from langchain.schema import Document
 from pytest_mock import MockerFixture
 
+from src.config import config
 from src.document_loader import DocumentLoader
 from src.exceptions import NotFoundFileError, OperationFailedError
 
@@ -139,7 +140,7 @@ class Testドキュメントローダー:
         mock_splitter.assert_called_once_with(
             chunk_size=400,
             chunk_overlap=100,
-            separators=['\\n\\n', '\\n', '。', '、', ' ', ''],
+            separators=['\\n\\n', '\\n', '。'],
         )
 
     def test_PDFを処理できる(self, mocker: MockerFixture) -> None:
@@ -165,10 +166,8 @@ class Testドキュメントローダー:
 
         # 検証
         assert result == mock_chunks
-        expected_url = 'https://scrumexpansion.org/ja/scrum-guide-expansion-pack/2025.6/pdf/scrum-guide-expansion-pack.ja.pdf'
-        expected_filename = 'scrum-guide-expansion-pack.ja.pdf'
-
-        mock_download.assert_called_once_with(expected_url, expected_filename)
+        # configの実際の値を使用する
+        mock_download.assert_called_once_with(config.pdf_url, config.pdf_filename)
         mock_extract.assert_called_once_with(mock_path)
         mock_split.assert_called_once_with(mock_documents)
 

@@ -17,7 +17,7 @@ def document_loader(mocker: MockerFixture) -> 'DocumentLoader':
     mock_response.content = b''
     mock_response.raise_for_status.return_value = None
     mocker.patch('requests.get', return_value=mock_response)
-    data_dir = config.chroma_persist_directory.parent
+    data_dir = config.faiss_persist_directory.parent
     return DocumentLoader(data_dir=data_dir)
 
 
@@ -25,7 +25,7 @@ def document_loader(mocker: MockerFixture) -> 'DocumentLoader':
 def vector_store() -> 'VectorStore':
     """VectorStoreインスタンスを提供する."""
     return VectorStore(
-        persist_directory=config.chroma_persist_directory,
+        persist_directory=config.faiss_persist_directory,
         embedding_model=config.embedding_model,
     )
 

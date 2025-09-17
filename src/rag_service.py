@@ -8,7 +8,7 @@ from typing import Any
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 
-from .config import config
+from .config import Config, config
 from .document_loader import DocumentLoader
 from .exceptions import OperationFailedError
 from .vector_store import VectorStore
@@ -17,11 +17,11 @@ from .vector_store import VectorStore
 class RAGService:
     """RAGサービスクラス."""
 
-    def __init__(self) -> None:
+    def __init__(self, config_instance: Config | None = None) -> None:
         """初期化."""
-        self.config = config
+        self.config = config_instance or config
         self.vector_store = VectorStore(
-            persist_directory=self.config.chroma_persist_directory,
+            persist_directory=self.config.faiss_persist_directory,
             embedding_model=self.config.embedding_model,
             openai_api_base=self.config.openai_api_base,
         )
@@ -167,7 +167,7 @@ class RAGService:
         """
         try:
             # DocumentLoaderを初期化: DATA_DIR/raw 配下を使う
-            data_dir = self.config.chroma_persist_directory.parent
+            data_dir = self.config.faiss_persist_directory.parent
             raw_dir = data_dir / 'raw'
             raw_dir.mkdir(parents=True, exist_ok=True)
             loader = DocumentLoader(data_dir=data_dir)

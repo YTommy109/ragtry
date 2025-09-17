@@ -1,14 +1,12 @@
 """ベクトルストア管理モジュール.
 
-Chromaデータベースの初期化、埋め込み処理、データ保存を行う。
+FAISSベクトルデータベースの初期化、埋め込み処理、データ保存を行う。
 """
 
 from pathlib import Path
 
-import chromadb
-from chromadb.config import Settings
 from langchain.schema import Document
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 
 from .exceptions import OperationFailedError
@@ -27,8 +25,8 @@ class VectorStore:
         """初期化.
 
         Args:
-            persist_directory: Chromaデータベースの永続化ディレクトリ
-            collection_name: コレクション名
+            persist_directory: FAISSベクトルデータベースの永続化ディレクトリ
+            collection_name: コレクション名(FAISSファイル名の一部として使用)
             embedding_model: 埋め込みモデル名
             openai_api_base: OpenAI互換APIのベースURL(オプション)
         """
@@ -50,75 +48,58 @@ class VectorStore:
         else:
             self.embeddings = OpenAIEmbeddings(model=embedding_model)
 
-        # Chromaクライアントの初期化
-        self._initialize_chroma_client()
+        # FAISSインデックスファイルのパス
+        self.index_path = self.persist_directory / f'{collection_name}.faiss'
+        self.pkl_path = self.persist_directory / f'{collection_name}.pkl'
 
-    def _initialize_chroma_client(self) -> None:
-        """Chromaクライアントを初期化する."""
-        # Chroma設定
-        settings = Settings(
-            persist_directory=str(self.persist_directory),
-            anonymized_telemetry=False,
-            is_persistent=True,
-        )
-
-        self.client = chromadb.Client(settings)
-
-    def reset_client(self) -> None:
-        """Chromaクライアントをリセットする.
-
-        Raises:
-            OperationFailedError: クライアントのリセットに失敗した場合
-        """
-        try:
-            if hasattr(self, 'client'):
-                del self.client
-            self._initialize_chroma_client()
-        except Exception as e:
-            raise OperationFailedError(operation='クライアントのリセット', error=str(e)) from e
-
-    def initialize_vectorstore(self) -> Chroma:
-        """ベクトルストアを初期化する.
+    def _load_vectorstore(self) -> FAISS | None:  # noqa: PLR0911
+        """既存のFAISSベクトルストアを読み込む.
 
         Returns:
-            初期化されたChromaベクトルストア
-
-        Raises:
-            Exception: 初期化に失敗した場合
+            読み込まれたFAISSベクトルストア、存在しない場合はNone
         """
+        # ファイルが存在しない場合は None を返す
+        if not (self.index_path.exists() and self.pkl_path.exists()):
+            return None
+
+        # ファイルが存在する場合は読み込みを試行、失敗時も None を返す
         try:
-            return Chroma(
-                collection_name=self.collection_name,
-                embedding_function=self.embeddings,
-                persist_directory=str(self.persist_directory),
-                client_settings=Settings(
-                    persist_directory=str(self.persist_directory),
-                    anonymized_telemetry=False,
-                    is_persistent=True,
-                ),
+            return FAISS.load_local(
+                str(self.persist_directory),
+                self.embeddings,
+                index_name=self.collection_name,
+                allow_dangerous_deserialization=True,
             )
+        except Exception:
+            # ファイルが破損している場合などは None を返して新規作成を促す
+            return None
 
-        except Exception as e:
-            # 設定の競合エラーの場合、クライアントをリセットして再試行
-            if 'different settings' in str(e):
-                self.reset_client()
-                try:
-                    return Chroma(
-                        collection_name=self.collection_name,
-                        embedding_function=self.embeddings,
-                        persist_directory=str(self.persist_directory),
-                        client_settings=Settings(
-                            persist_directory=str(self.persist_directory),
-                            anonymized_telemetry=False,
-                            is_persistent=True,
-                        ),
-                    )
-                except Exception as retry_e:
-                    raise OperationFailedError(
-                        operation='ベクトルストア初期化', error=str(retry_e)
-                    ) from retry_e
+    def _create_new_vectorstore(self, documents: list[Document]) -> FAISS:
+        """新規ベクトルストアを作成する.
 
-            raise OperationFailedError(operation='ベクトルストア初期化', error=str(e)) from e
+        Args:
+            documents: 初期ドキュメントのリスト
+
+        Returns:
+            作成されたFAISSベクトルストア
+        """
+        texts = [doc.page_content for doc in documents]
+        metadatas = [doc.metadata for doc in documents]
+        return FAISS.from_texts(texts, self.embeddings, metadatas=metadatas)
+
+    def _add_to_existing_vectorstore(
+        self, vectorstore: FAISS, documents: list[Document], batch_size: int
+    ) -> None:
+        """既存のベクトルストアにドキュメントを追加する.
+
+        Args:
+            vectorstore: 既存のFAISSベクトルストア
+            documents: 追加するドキュメントのリスト
+            batch_size: バッチ処理のサイズ
+        """
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i : i + batch_size]
+            vectorstore.add_documents(batch)
 
     def add_documents(
         self,
@@ -132,20 +113,21 @@ class VectorStore:
             batch_size: バッチ処理のサイズ
 
         Raises:
-            Exception: ドキュメント追加に失敗した場合
+            OperationFailedError: ドキュメント追加に失敗した場合
         """
         if not documents:
             return
 
         try:
-            vectorstore = self.initialize_vectorstore()
+            vectorstore = self._load_vectorstore()
 
-            # バッチ処理でドキュメントを追加
-            for i in range(0, len(documents), batch_size):
-                batch = documents[i : i + batch_size]
-                vectorstore.add_documents(batch)
+            if vectorstore is None:
+                vectorstore = self._create_new_vectorstore(documents)
+            else:
+                self._add_to_existing_vectorstore(vectorstore, documents, batch_size)
 
-            # 新しいlangchain-chromaでは自動的に永続化される
+            # FAISSインデックスを保存
+            vectorstore.save_local(str(self.persist_directory), index_name=self.collection_name)
 
         except Exception as e:
             raise OperationFailedError(operation='ドキュメント追加', error=str(e)) from e
@@ -156,22 +138,19 @@ class VectorStore:
         Returns:
             コレクションが存在する場合True
         """
-        try:
-            collections = self.client.list_collections()
-            collection_names = [col.name for col in collections]
-            return self.collection_name in collection_names
-        except Exception:
-            return False
+        return self.index_path.exists() and self.pkl_path.exists()
 
     def delete_collection(self) -> None:
         """コレクションを削除する.
 
         Raises:
-            Exception: コレクション削除に失敗した場合
+            OperationFailedError: コレクション削除に失敗した場合
         """
         try:
-            if self.collection_exists():
-                self.client.delete_collection(self.collection_name)
+            if self.index_path.exists():
+                self.index_path.unlink()
+            if self.pkl_path.exists():
+                self.pkl_path.unlink()
         except Exception as e:
             raise OperationFailedError(operation='コレクション削除', error=str(e)) from e
 
@@ -182,14 +161,14 @@ class VectorStore:
             ドキュメント数
 
         Raises:
-            Exception: カウント取得に失敗した場合
+            OperationFailedError: カウント取得に失敗した場合
         """
         try:
             if not self.collection_exists():
                 return 0
 
-            collection = self.client.get_collection(self.collection_name)
-            return collection.count()
+            vectorstore = self._load_vectorstore()
+            return vectorstore.index.ntotal if vectorstore else 0
 
         except Exception as e:
             raise OperationFailedError(operation='ドキュメント数取得', error=str(e)) from e
@@ -209,10 +188,12 @@ class VectorStore:
             類似度の高い文書のリスト
 
         Raises:
-            Exception: 検索に失敗した場合
+            OperationFailedError: 検索に失敗した場合
         """
         try:
-            vectorstore = self.initialize_vectorstore()
+            vectorstore = self._load_vectorstore()
+            if vectorstore is None:
+                return []  # ベクトルストアが存在しない場合は空のリストを返す
             return vectorstore.similarity_search(query, k=k)
 
         except Exception as e:
@@ -233,10 +214,12 @@ class VectorStore:
             (文書, スコア)のタプルのリスト
 
         Raises:
-            Exception: 検索に失敗した場合
+            OperationFailedError: 検索に失敗した場合
         """
         try:
-            vectorstore = self.initialize_vectorstore()
+            vectorstore = self._load_vectorstore()
+            if vectorstore is None:
+                return []  # ベクトルストアが存在しない場合は空のリストを返す
             return vectorstore.similarity_search_with_score(query, k=k)
 
         except Exception as e:
