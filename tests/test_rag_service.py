@@ -23,12 +23,23 @@ class TestRAGサービス:
         mock_vector_store.assert_called_once_with(
             persist_directory=config.chroma_persist_directory,
             embedding_model=config.embedding_model,
+            openai_api_base=config.openai_api_base,
         )
 
         # ChatOpenAIの初期化確認
-        mock_chat_openai.assert_called_once_with(
-            model=config.llm_model, api_key=config.openai_api_key, temperature=0.1
-        )
+        if config.openai_api_base:
+            mock_chat_openai.assert_called_once_with(
+                model=config.llm_model,
+                api_key=config.openai_api_key,
+                temperature=0.1,
+                base_url=config.openai_api_base,
+            )
+        else:
+            mock_chat_openai.assert_called_once_with(
+                model=config.llm_model,
+                api_key=config.openai_api_key,
+                temperature=0.1,
+            )
 
     def test_検索k未指定で文書を取得できる(self, mocker: MockerFixture) -> None:
         # モックの設定

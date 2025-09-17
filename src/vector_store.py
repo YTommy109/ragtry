@@ -22,6 +22,7 @@ class VectorStore:
         persist_directory: Path,
         collection_name: str = 'scrum_guide_collection',
         embedding_model: str = 'text-embedding-3-small',
+        openai_api_base: str | None = None,
     ) -> None:
         """初期化.
 
@@ -29,6 +30,7 @@ class VectorStore:
             persist_directory: Chromaデータベースの永続化ディレクトリ
             collection_name: コレクション名
             embedding_model: 埋め込みモデル名
+            openai_api_base: OpenAI互換APIのベースURL(オプション)
         """
         self.persist_directory = persist_directory
         self.collection_name = collection_name
@@ -40,7 +42,13 @@ class VectorStore:
         self.persist_directory.mkdir(parents=True, exist_ok=True)
 
         # 埋め込み関数の初期化
-        self.embeddings = OpenAIEmbeddings(model=embedding_model)
+        if openai_api_base:
+            self.embeddings = OpenAIEmbeddings(
+                model=embedding_model,
+                base_url=openai_api_base,
+            )
+        else:
+            self.embeddings = OpenAIEmbeddings(model=embedding_model)
 
         # Chromaクライアントの初期化
         self._initialize_chroma_client()

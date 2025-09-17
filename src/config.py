@@ -79,6 +79,11 @@ class Config:
     def embedding_model(self) -> str:
         return os.environ['EMBEDDING_MODEL']
 
+    @property
+    def openai_api_base(self) -> str | None:
+        """OpenAI互換APIのベースURL(オプション)."""
+        return os.environ.get('OPENAI_API_BASE')
+
 
 def load_env_file(env: 'AppEnv', loader: Callable[[str], bool]) -> None:
     """環境に応じた .env をロードする(ローダを注入)."""

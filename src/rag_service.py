@@ -23,12 +23,22 @@ class RAGService:
         self.vector_store = VectorStore(
             persist_directory=self.config.chroma_persist_directory,
             embedding_model=self.config.embedding_model,
+            openai_api_base=self.config.openai_api_base,
         )
-        self.llm = ChatOpenAI(
-            model=self.config.llm_model,
-            api_key=self.config.openai_api_key,  # type: ignore[arg-type]
-            temperature=0.1,
-        )
+        # ChatOpenAIの初期化
+        if self.config.openai_api_base:
+            self.llm = ChatOpenAI(
+                model=self.config.llm_model,
+                api_key=self.config.openai_api_key,  # type: ignore[arg-type]
+                temperature=0.1,
+                base_url=self.config.openai_api_base,
+            )
+        else:
+            self.llm = ChatOpenAI(
+                model=self.config.llm_model,
+                api_key=self.config.openai_api_key,  # type: ignore[arg-type]
+                temperature=0.1,
+            )
 
     def search_similar_documents(self, query: str, k: int | None = None) -> list[Document]:
         """類似文書を検索する.
