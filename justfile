@@ -103,7 +103,7 @@ sync mode='':
 
 # 仮想環境の作成
 venv:
-    uv venv -p 3.13
+    uv venv -p 3.12
 
 # すべてのチェックとテストを実行
 # just test-all        -> lint, test

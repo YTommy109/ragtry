@@ -1,7 +1,7 @@
 [project]
 name = "ragtry"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 
 dependencies = [
     "click>=8.0.0",               # CLI用
@@ -171,7 +171,7 @@ max-statements = 15 # 関数内の文の最大数（可読性保持、LLM品質�
 # =====================================
 
 [tool.mypy]
-python_version = "3.13" # 対象Pythonバージョン
+python_version = "3.12" # 対象Pythonバージョン
 strict = true           # 厳格モード有効（高品質コード保証）
 show_error_codes = true # エラーコードを表示（精密な制御のため）
 pretty = true           # 色付きで見やすいエラー表示
