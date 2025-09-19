@@ -50,6 +50,10 @@ class Config:
         return self.data_dir / 'vector_db'
 
     @property
+    def bm25_persist_directory(self) -> Path:
+        return self.data_dir / 'keyword_db'
+
+    @property
     def data_dir(self) -> Path:
         return Path(os.environ['DATA_DIR'])
 

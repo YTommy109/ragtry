@@ -22,6 +22,7 @@ class TestRAGサービス:
         # VectorStoreの初期化確認
         mock_vector_store.assert_called_once_with(
             persist_directory=config.faiss_persist_directory,
+            bm25_persist_directory=config.bm25_persist_directory,
             embedding_model=config.embedding_model,
             openai_api_base=config.openai_api_base,
         )

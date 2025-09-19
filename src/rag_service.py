@@ -8,6 +8,7 @@ from typing import Any
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 
+from .app_types import SearchType
 from .config import Config, config
 from .document_loader import DocumentLoader
 from .exceptions import OperationFailedError
@@ -22,6 +23,7 @@ class RAGService:
         self.config = config_instance or config
         self.vector_store = VectorStore(
             persist_directory=self.config.faiss_persist_directory,
+            bm25_persist_directory=self.config.bm25_persist_directory,
             embedding_model=self.config.embedding_model,
             openai_api_base=self.config.openai_api_base,
         )
@@ -40,23 +42,38 @@ class RAGService:
                 temperature=0.1,
             )
 
-    def search_similar_documents(self, query: str, k: int | None = None) -> list[Document]:
+    def _execute_search(self, query: str, search_k: int, search_type: SearchType) -> list[Document]:
+        """検索タイプに応じて検索を実行する."""
+        if search_type == SearchType.SEMANTIC:
+            return self.vector_store.similarity_search(query, k=search_k)
+        if search_type == SearchType.KEYWORD:
+            return self.vector_store.bm25_search(query, k=search_k)
+        if search_type == SearchType.HYBRID:
+            return self.vector_store.hybrid_search(query, k=search_k)
+        raise ValueError(f'Unsupported search type: {search_type}')
+
+    def search_similar_documents(
+        self,
+        query: str,
+        k: int | None = None,
+        search_type: SearchType = SearchType.SEMANTIC,
+    ) -> list[Document]:
         """類似文書を検索する.
 
         Args:
             query: 検索クエリ
             k: 検索する文書数 (None の場合は設定値を使用)
+            search_type: 検索タイプ
 
         Returns:
             類似文書のリスト
 
         Raises:
-            RAGServiceError: 検索に失敗した場合
+            OperationFailedError: 検索に失敗した場合
         """
         try:
             search_k = k if k is not None else self.config.search_k
-            result: list[Document] = self.vector_store.similarity_search(query, k=search_k)
-            return result
+            return self._execute_search(query, search_k, search_type)
         except Exception as e:
             raise OperationFailedError(operation='文書検索', error=str(e)) from e
 
@@ -112,11 +129,12 @@ class RAGService:
 【回答】
 """
 
-    def generate_response(self, query: str) -> str:
+    def generate_response(self, query: str, search_type: SearchType = SearchType.SEMANTIC) -> str:
         """質問に対する回答を生成する.
 
         Args:
             query: ユーザーの質問
+            search_type: 検索タイプ
 
         Returns:
             生成された回答
@@ -126,7 +144,7 @@ class RAGService:
         """
         try:
             # 関連文書を検索
-            documents = self.search_similar_documents(query)
+            documents = self.search_similar_documents(query, search_type=search_type)
 
             # コンテキストを構築
             context = self.build_context(documents)

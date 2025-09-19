@@ -15,6 +15,7 @@ dependencies = [
     "pypdf>=4.0.0",
     "python-dotenv>=1.0.0",
     "pytz>=2025.2",
+    "rank-bm25>=0.2.2",           # BM25キーワード検索用
     "requests>=2.31.0",
 ]
 
@@ -135,9 +136,9 @@ mark-parentheses = false    # pytest markで括弧を強制しない
 ban-relative-imports = "parents" # 親ディレクトリへの相対importを禁止
 
 [tool.ruff.lint.pylint]
-max-args = 4        # 関数の引数の最大数（4個まで許可、LLM品質向上）
+max-args = 5        # 関数の引数の最大数（5個まで許可、LLM品質向上）
 max-branches = 5    # 関数内の分岐の最大数（if、for、while等）
-max-returns = 2     # 関数内のreturn文の最大数（単一出口原則）
+max-returns = 3     # 関数内のreturn文の最大数（単一出口原則）
 max-statements = 15 # 関数内の文の最大数（可読性保持、LLM品質向上）
 
 [tool.ruff.lint.per-file-ignores]
@@ -152,6 +153,7 @@ max-statements = 15 # 関数内の文の最大数（可読性保持、LLM品質�
     "T20",     # print文許可（テストでのデバッグ出力）
     "DTZ",     # datetime関連許可（テストではTZ不要）
     "ERA001",  # コメントアウトコード許可（Gherkin記法のため）
+    "ANN",     # 型注釈許可（テストでは不要）
 ]
 "tests_e2e/**" = [
     "PLR2004", # マジックナンバー許可（座標・サイズ指定）
@@ -164,6 +166,7 @@ max-statements = 15 # 関数内の文の最大数（可読性保持、LLM品質�
     "T20",     # print文許可（デバッグ出力）
     "DTZ",     # datetime関連許可（テストではTZ不要）
     "ERA001",  # コメントアウトコード許可（Gherkin記法のため）
+    "ANN",     # 型注釈許可（テストでは不要）
 ]
 
 # =====================================

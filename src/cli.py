@@ -9,6 +9,7 @@ from typing import Any
 
 import click
 
+from src.app_types import SearchType
 from src.config import Config, bootstrap_config
 from src.rag_service import RAGService
 
@@ -48,21 +49,25 @@ def _check_collection_existence(rag_service: RAGService, env: str) -> bool:
 
 
 def _search_documents_with_progress(
-    rag_service: RAGService, question: str, search_k: int
+    rag_service: RAGService, question: str, search_k: int, search_type: SearchType
 ) -> list[Any]:
     """プログレスバー付きで文書検索を行う."""
     with click.progressbar(length=100, label='検索中') as bar:
         bar.update(30)
-        documents = rag_service.search_similar_documents(question, k=search_k)
+        documents = rag_service.search_similar_documents(
+            question, k=search_k, search_type=search_type
+        )
         bar.update(70)
     return documents
 
 
-def _generate_response_with_progress(rag_service: RAGService, question: str) -> str:
+def _generate_response_with_progress(
+    rag_service: RAGService, question: str, search_type: SearchType
+) -> str:
     """プログレスバー付きで回答を生成する."""
     with click.progressbar(length=100, label='回答生成中') as bar:
         bar.update(50)
-        response = rag_service.generate_response(question)
+        response = rag_service.generate_response(question, search_type=search_type)
         bar.update(50)
     return response
 
@@ -165,17 +170,17 @@ def build(ctx: click.Context) -> None:
 
 
 def _process_query_request(
-    rag_service: RAGService, question: str, search_k: int
+    rag_service: RAGService, question: str, search_k: int, search_type: SearchType
 ) -> tuple[str, list[Any]] | None:
     """クエリリクエストを処理し、回答と文書を返す."""
-    documents = _search_documents_with_progress(rag_service, question, search_k)
+    documents = _search_documents_with_progress(rag_service, question, search_k, search_type)
 
     if not documents:
         click.echo('\n関連する文書が見つかりませんでした。')
         click.echo('より具体的な質問をお試しください。')
         return None
 
-    response = _generate_response_with_progress(rag_service, question)
+    response = _generate_response_with_progress(rag_service, question, search_type)
     return response, documents
 
 
@@ -192,8 +197,14 @@ def _prepare_service(env: str) -> tuple[RAGService, Config]:
 @cli.command()
 @click.argument('question')
 @click.option('--k', type=int, default=None, help='検索する関連文書の数(デフォルト: 設定値を使用)')
+@click.option(
+    '--search-type',
+    type=click.Choice([SearchType.SEMANTIC, SearchType.KEYWORD, SearchType.HYBRID]),
+    default=SearchType.SEMANTIC,
+    help='検索タイプ(semantic: セマンティック検索, keyword: キーワード検索, hybrid: ハイブリッド)',
+)
 @click.pass_context
-def query(ctx: click.Context, question: str, k: int | None) -> None:  # noqa: PLR0915
+def query(ctx: click.Context, question: str, k: int | None, search_type: str) -> None:  # noqa: PLR0915
     """質問に対して回答を生成します.
 
     QUESTION: 質問内容(例: "スクラムとは何ですか?")
@@ -210,7 +221,8 @@ def query(ctx: click.Context, question: str, k: int | None) -> None:  # noqa: PL
         click.echo('回答を生成中...')
 
         search_k = k if k is not None else config.search_k
-        result = _process_query_request(rag_service, question, search_k)
+        search_type_enum = SearchType(search_type)
+        result = _process_query_request(rag_service, question, search_k, search_type_enum)
 
         if result is None:
             return
@@ -218,6 +230,9 @@ def query(ctx: click.Context, question: str, k: int | None) -> None:  # noqa: PL
         response, documents = result
         _display_response(response)
         _display_reference_documents(documents)
+
+        # 検索タイプを表示
+        click.echo(f'\n検索タイプ: {search_type_enum.value}')
 
     except Exception as e:
         click.echo(f'エラー: {e}', err=True)

@@ -44,7 +44,8 @@ class TestVectorStore:
         assert vector_store.persist_directory == custom_dir
         assert vector_store.collection_name == 'custom_collection'
         assert vector_store.embedding_model == 'text-embedding-ada-002'
-        assert custom_dir.exists()
+        # ディレクトリは初期化時ではなく、実際にファイル保存時に作成される
+        assert not custom_dir.exists()
 
     def test_ベクトルストアを読み込める(self, mocker: MockerFixture) -> None:
         # Mock OpenAI embeddings and environment
@@ -253,5 +254,5 @@ class TestVectorStoreIntegration:
         mocker.patch.dict(os.environ, {'OPENAI_API_KEY': 'sk-test123'})
         VectorStore(persist_directory=new_dir)
 
-        # ディレクトリが作成されていることを確認
-        assert new_dir.exists()
+        # ディレクトリは初期化時ではなく、実際にファイル保存時に作成される
+        assert not new_dir.exists()

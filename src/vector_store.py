@@ -10,6 +10,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 
 from .exceptions import OperationFailedError
+from .keyword_search import KeywordSearch
 
 
 class VectorStore:
@@ -18,6 +19,8 @@ class VectorStore:
     def __init__(
         self,
         persist_directory: Path,
+        *,
+        bm25_persist_directory: Path | None = None,
         collection_name: str = 'scrum_guide_collection',
         embedding_model: str = 'text-embedding-3-small',
         openai_api_base: str | None = None,
@@ -26,7 +29,8 @@ class VectorStore:
 
         Args:
             persist_directory: FAISSベクトルデータベースの永続化ディレクトリ
-            collection_name: コレクション名(FAISSファイル名の一部として使用)
+            bm25_persist_directory: BM25インデックスの永続化ディレクトリ
+            collection_name: コレクション名(ファイル名の一部として使用)
             embedding_model: 埋め込みモデル名
             openai_api_base: OpenAI互換APIのベースURL(オプション)
         """
@@ -34,10 +38,7 @@ class VectorStore:
         self.collection_name = collection_name
         self.embedding_model = embedding_model
 
-        # ベースデータディレクトリも作成しておく
-        self.persist_directory.parent.mkdir(parents=True, exist_ok=True)
-        # ベクトルDBディレクトリも作成
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        # ディレクトリ作成は実際にファイルを保存する時に行う
 
         # 埋め込み関数の初期化
         if openai_api_base:
@@ -52,7 +53,14 @@ class VectorStore:
         self.index_path = self.persist_directory / f'{collection_name}.faiss'
         self.pkl_path = self.persist_directory / f'{collection_name}.pkl'
 
-    def _load_vectorstore(self) -> FAISS | None:  # noqa: PLR0911
+        # BM25キーワード検索の初期化
+        bm25_dir = bm25_persist_directory or persist_directory / 'keyword_db'
+        self.keyword_search = KeywordSearch(
+            persist_directory=bm25_dir,
+            collection_name=collection_name,
+        )
+
+    def _load_vectorstore(self) -> FAISS | None:
         """既存のFAISSベクトルストアを読み込む.
 
         Returns:
@@ -126,8 +134,12 @@ class VectorStore:
             else:
                 self._add_to_existing_vectorstore(vectorstore, documents, batch_size)
 
-            # FAISSインデックスを保存
+            # FAISSインデックスを保存（ディレクトリを作成してから）
+            self.persist_directory.mkdir(parents=True, exist_ok=True)
             vectorstore.save_local(str(self.persist_directory), index_name=self.collection_name)
+
+            # BM25インデックスにも追加
+            self.keyword_search.add_documents(documents)
 
         except Exception as e:
             raise OperationFailedError(operation='ドキュメント追加', error=str(e)) from e
@@ -138,7 +150,9 @@ class VectorStore:
         Returns:
             コレクションが存在する場合True
         """
-        return self.index_path.exists() and self.pkl_path.exists()
+        faiss_exists = self.index_path.exists() and self.pkl_path.exists()
+        bm25_exists = self.keyword_search.collection_exists()
+        return faiss_exists or bm25_exists
 
     def delete_collection(self) -> None:
         """コレクションを削除する.
@@ -147,10 +161,15 @@ class VectorStore:
             OperationFailedError: コレクション削除に失敗した場合
         """
         try:
+            # FAISSインデックスを削除
             if self.index_path.exists():
                 self.index_path.unlink()
             if self.pkl_path.exists():
                 self.pkl_path.unlink()
+
+            # BM25インデックスも削除
+            self.keyword_search.delete_collection()
+
         except Exception as e:
             raise OperationFailedError(operation='コレクション削除', error=str(e)) from e
 
@@ -224,3 +243,117 @@ class VectorStore:
 
         except Exception as e:
             raise OperationFailedError(operation='スコア付き類似度検索', error=str(e)) from e
+
+    def bm25_search(
+        self,
+        query: str,
+        k: int = 4,
+    ) -> list[Document]:
+        """BM25キーワード検索を実行する.
+
+        Args:
+            query: 検索クエリ
+            k: 取得する文書数
+
+        Returns:
+            スコアの高い文書のリスト
+
+        Raises:
+            OperationFailedError: 検索に失敗した場合
+        """
+        try:
+            return self.keyword_search.search(query, k=k)
+        except Exception as e:
+            raise OperationFailedError(operation='キーワード検索', error=str(e)) from e
+
+    def hybrid_search(
+        self,
+        query: str,
+        k: int = 4,
+        semantic_ratio: float = 0.7,
+    ) -> list[Document]:
+        """ハイブリッド検索(セマンティック + キーワード)を実行する.
+
+        Args:
+            query: 検索クエリ
+            k: 取得する文書数
+            semantic_ratio: セマンティック検索の重み(0.0-1.0)
+
+        Returns:
+            統合された検索結果のリスト
+
+        Raises:
+            OperationFailedError: 検索に失敗した場合
+        """
+        try:
+            # セマンティック検索とキーワード検索を並行実行
+            semantic_docs = self.similarity_search(query, k=k * 2)  # 多めに取得
+            keyword_docs = self.keyword_search.search(query, k=k * 2)  # 多めに取得
+
+            # 結果を統合して重複排除
+            return self._combine_search_results(
+                semantic_docs,
+                keyword_docs,
+                k=k,
+                semantic_ratio=semantic_ratio,
+            )
+
+        except Exception as e:
+            raise OperationFailedError(operation='ハイブリッド検索', error=str(e)) from e
+
+    def _combine_search_results(
+        self,
+        semantic_docs: list[Document],
+        keyword_docs: list[Document],
+        k: int,
+        semantic_ratio: float,
+    ) -> list[Document]:
+        """検索結果を統合する.
+
+        Args:
+            semantic_docs: セマンティック検索の結果
+            keyword_docs: キーワード検索の結果
+            k: 最終的に返す文書数
+            semantic_ratio: セマンティック検索の重み
+
+        Returns:
+            統合された検索結果
+        """
+        # 文書IDを使用して重複排除と統合を行う
+        doc_scores: dict[str, float] = {}
+        doc_map: dict[str, Document] = {}
+
+        # セマンティック検索の結果を処理
+        for i, doc in enumerate(semantic_docs):
+            doc_id = self._get_document_id(doc)
+            # 順位ベースのスコア（高い順位ほど高いスコア）
+            score = semantic_ratio * (len(semantic_docs) - i) / len(semantic_docs)
+            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + score
+            doc_map[doc_id] = doc
+
+        # キーワード検索の結果を処理
+        keyword_ratio = 1.0 - semantic_ratio
+        for i, doc in enumerate(keyword_docs):
+            doc_id = self._get_document_id(doc)
+            # 順位ベースのスコア
+            score = keyword_ratio * (len(keyword_docs) - i) / len(keyword_docs)
+            doc_scores[doc_id] = doc_scores.get(doc_id, 0) + score
+            doc_map[doc_id] = doc
+
+        # スコアの高い順にソートしてトップkを取得
+        sorted_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        return [doc_map[doc_id] for doc_id, _ in sorted_docs[:k]]
+
+    def _get_document_id(self, doc: Document) -> str:
+        """ドキュメントから一意のIDを生成する.
+
+        Args:
+            doc: ドキュメント
+
+        Returns:
+            ドキュメントID
+        """
+        # ページ情報とコンテンツの最初の100文字でIDを生成
+        page = doc.metadata.get('page', 0)
+        content_hash = hash(doc.page_content[:100])
+        return f'{page}_{content_hash}'
